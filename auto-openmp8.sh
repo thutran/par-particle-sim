@@ -1,11 +1,4 @@
 #!/bin/bash
-#SBATCH -A sc5fp4p # 2019 XSEDE Applications of Parallel Computing Course Allocation
-#SBATCH -J auto-particle-openmp16
-#SBATCH -o auto-particle-openmp16.stdout
-#SBATCH -n 16         
-#SBATCH -p RM
-#SBATCH -t 00:10:00     
-#SBATCH -N 1        
 
 rm openmp_sum.txt
 ./serial -n 500 -no -s openmp_sum.txt
@@ -22,9 +15,6 @@ export OMP_NUM_THREADS=4
 export OMP_NUM_THREADS=8
 ./openmp -n 500 -no -s openmp_sum.txt
 
-export OMP_NUM_THREADS=16
-./openmp -n 500 -no -s openmp_sum.txt
-
 export OMP_NUM_THREADS=2
 ./openmp -n 1000 -no -s openmp_sum.txt
 
@@ -34,7 +24,7 @@ export OMP_NUM_THREADS=4
 export OMP_NUM_THREADS=8
 ./openmp -n 4000 -no -s openmp_sum.txt
 
-export OMP_NUM_THREADS=16
+export OMP_NUM_THREADS=8
 ./openmp -n 8000 -no -s openmp_sum.txt
 
 ./autograder -v openmp -s openmp_sum.txt

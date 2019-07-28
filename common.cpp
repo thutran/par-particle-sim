@@ -7,6 +7,7 @@
 #include <time.h>
 #include <sys/time.h>
 #include "common.h"
+#include <iostream>
 
 double size;
 
@@ -18,6 +19,7 @@ double size;
 #define cutoff  0.01
 #define min_r   (cutoff/100)
 #define dt      0.0005
+// #define dt      0.005
 
 //
 //  timer
@@ -42,6 +44,8 @@ double read_timer( )
 void set_size( int n )
 {
     size = sqrt( density * n );
+    // printf("sqrt(n) %f\t sqrt(density) %f\t size%f\n", sqrt(n), sqrt(density), size);
+    // printf("size: %f\n", size);
 }
 
 //
@@ -73,6 +77,10 @@ void init_particles( int n, particle_t *p )
         p[i].x = size*(1.+(k%sx))/(1+sx);
         p[i].y = size*(1.+(k/sx))/(1+sy);
 
+        // p[i].x = size*(0.0+(k%sx))/(0+sx);
+        // p[i].y = size*(0.0+(k/sx))/(0+sy);
+        // printf("x: %f\t y: %f\n", p[i].x, p[i].y);
+
         //
         //  assign random velocities within a bound
         //
@@ -85,21 +93,30 @@ void init_particles( int n, particle_t *p )
 //
 //  interact two particles
 //
-void apply_force( particle_t &particle, particle_t &neighbor , double *dmin, double *davg, int *navg)
-{
+void apply_force( particle_t &particle, particle_t &neighbor , double *dmin, double *davg, int *navg){
+    // printf("%s\n", "in apply_force");
 
     double dx = neighbor.x - particle.x;
     double dy = neighbor.y - particle.y;
     double r2 = dx * dx + dy * dy;
-    if( r2 > cutoff*cutoff )
+
+    // case neighbor is too far away
+    if( r2 > cutoff*cutoff ){
+        // printf("p_x%f\t p_y%f\t nb_x%f\t nb_y%f\t\n", particle.x, particle.y, neighbor.x, neighbor.y);
         return;
-	if (r2 != 0)
-        {
-	   if (r2/(cutoff*cutoff) < *dmin * (*dmin))
-	      *dmin = sqrt(r2)/cutoff;
-           (*davg) += sqrt(r2)/cutoff;
-           (*navg) ++;
-        }
+    }
+    // case neighbor != particle
+	if (r2 != 0){
+        // prepare to update min distance between 2 particles
+        if (r2/(cutoff*cutoff) < *dmin * (*dmin))
+            *dmin = sqrt(r2)/cutoff;
+        // prepare to update average distance between 2 particles
+        (*davg) += sqrt(r2)/cutoff;
+        (*navg) ++;
+
+        // if (*dmin < 0.4)
+            // printf("p_x%f\t p_y%f\t nb_x%f\t nb_y%f\t\n", particle.x, particle.y, neighbor.x, neighbor.y);
+    }
 		
     r2 = fmax( r2, min_r*min_r );
     double r = sqrt( r2 );
@@ -109,9 +126,12 @@ void apply_force( particle_t &particle, particle_t &neighbor , double *dmin, dou
     //
     //  very simple short-range repulsive force
     //
+    // F=ma <--> a=F/m
     double coef = ( 1 - cutoff / r ) / r2 / mass;
     particle.ax += coef * dx;
     particle.ay += coef * dy;
+
+    // printf("dmin_%f\n", *dmin);
 }
 
 //
@@ -141,6 +161,9 @@ void move( particle_t &p )
         p.y  = p.y < 0 ? -p.y : 2*size-p.y;
         p.vy = -p.vy;
     }
+
+    // p.cell_x = (int)(p.x/cutoff);
+    // p.cell_y = (int)(p.y/cutoff);
 }
 
 //
@@ -183,4 +206,87 @@ char *read_string( int argc, char **argv, const char *option, char *default_valu
     if( iplace >= 0 && iplace < argc-1 )
         return argv[iplace+1];
     return default_value;
+}
+
+
+
+//----------------------------------------------
+//
+// get bounds of x and y
+double get_size(){
+    return size;
+}
+
+// get cutoff value
+double get_cutoff(){
+    return cutoff;
+}
+
+// initialize grid
+// each particle will be assigned to a cell in the grid
+// each cell is a square, size cutoff-cutoff
+// grid is a square, size size-size
+void init_grid(const int& n, particle_t* p, const double& cell_size, const int& grid_width, std::vector<std::vector<particle_t*>> &cells){
+    for (int i = 0; i < grid_width*grid_width; ++i){
+        cells.emplace_back(std::vector<particle_t*>());
+    }
+    for (int i=0; i<n; ++i){
+        int cell_x = (int)floor(p[i].x/cell_size);
+        int cell_y = (int)floor(p[i].y/cell_size);
+
+        p[i].cell_x = cell_x;
+        p[i].cell_y = cell_y;
+
+        cells[cell_y*grid_width + cell_x].push_back(&p[i]);
+    }
+
+    // for (int i=0; i<grid_width*grid_width; ++i)
+    //     printf("cell_%d size %d\n", i, cells[i].size() );
+}
+
+// openmp version
+// apply force to all particles in a cell
+void visit_cell_and_apply_force(particle_t &particle, std::vector<std::vector<particle_t*>> &cells, const int& cell_i, double *dmin, double *davg, int *navg){
+    for (auto it=cells[cell_i].begin(); it!=cells[cell_i].end(); ++it){
+        // test if iterator point to the particle itself
+        if (*it != &particle){
+            // printf("%s\n", "in visit_cell_and_apply_force, call apply_force");
+            apply_force(particle, (*(*it)), dmin, davg, navg);
+
+        }
+    }
+}
+
+// serial version
+void move_to_cell(particle_t &p, const double& cell_size, const int& grid_width, std::vector<std::vector<particle_t*>> &cells){
+    const int cell_old = p.cell_y*grid_width + p.cell_x;
+
+    move(p);
+    p.cell_x = (int)floor(p.x/cell_size);
+    p.cell_y = (int)floor(p.y/cell_size);
+    
+    const int cell_new = p.cell_y*grid_width + p.cell_x;
+    
+    // change cell
+    if (cell_new != cell_old){
+        for (int i=0; i<cells[cell_old].size(); ++i){
+            if (cells[cell_old].at(i) == &p){
+                cells[cell_old].at(i) = cells[cell_old].back();
+                cells[cell_old].back() = nullptr;
+                cells[cell_old].pop_back();
+                break;
+            }
+        }
+        // std::cout << &p  << "\n";
+        cells[cell_new].push_back(&p);
+    }
+}
+
+// put particles into corresponding cells
+void fill_grid(const int& p_array_size, particle_t* p, const int& grid_width, std::vector<std::vector<particle_t*>> &cells){
+    for (int i=0; i<p_array_size; ++i){
+        cells[p[i].cell_y*grid_width + p[i].cell_x].push_back(&p[i]);
+    }
+    // for (int i=0; i<grid_width*grid_width; ++i)
+    //     printf("cell_%d size %d\n", i, cells[i].size() );
 }
